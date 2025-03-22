@@ -43,13 +43,9 @@ const database = admin.database();
 // Updated allowed origins to include the deployed frontend
 const allowedOrigins = [
   "http://localhost:5173",
-  "http://localhost:5174",
-  "https://web-production-fc86.up.railway.app", // Add your deployed frontend origin
-  "https://boot-watcher.vercel.app",
   "https://bootwatcher.com",
   "https://www.bootwatcher.com",
-  "https://bootwatcher-local-demo-git-master-aarons-projects-d1bad5c6.vercel.app",
-  "https://bootwatcher-local-demo-kahyg9n67-aarons-projects-d1bad5c6.vercel.app",
+  "https://www.bootwatcher.com/send-sms",
 ];
 
 // CORS configuration
