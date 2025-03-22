@@ -17,10 +17,11 @@
         }
       }
     },
+    "start": {
+      "command": "node server.js",
+      "port": 3000
+    },
     "deploy": {
-      "startCommand": "node server.js",
-      "restartPolicyType": "ON_FAILURE",
-      "healthcheckPath": "/",
-      "healthcheckTimeout": 100
+      "command": "npm run install-prod"
     }
   }
