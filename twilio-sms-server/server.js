@@ -32,6 +32,12 @@ const twilioApiKeySecret = process.env.TWILIO_API_KEY_SECRET;
 const twilioAccountSid = process.env.TWILIO_ACCOUNT_SID;
 const twilioPhone = process.env.TWILIO_PHONE_NUMBER;
 
+// Validate Twilio credentials
+if (!twilioApiKeySid || !twilioApiKeySecret || !twilioAccountSid || !twilioPhone) {
+  console.error("Missing Twilio credentials. Please check your environment variables.");
+  process.exit(1);
+}
+
 // Initialize Twilio client with API Key
 const client = twilio(twilioApiKeySid, twilioApiKeySecret, {
   accountSid: twilioAccountSid,
@@ -44,7 +50,7 @@ const database = admin.database();
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:5174",
-  "https://web-production-fc86.up.railway.app", // Add your deployed frontend origin
+  "https://web-production-fc86.up.railway.app",
   "https://boot-watcher.vercel.app",
   "https://bootwatcher.com",
   "https://www.bootwatcher.com",
@@ -53,22 +59,26 @@ const allowedOrigins = [
 ];
 
 // CORS configuration
-app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error("Not allowed by CORS"));
-    }
-  },
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  credentials: true,
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  optionsSuccessStatus: 200
-}));
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      // Allow requests with no origin (like mobile apps or curl) or if the origin is in the allowed list
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        console.log(`CORS error: Origin ${origin} not allowed`);
+        callback(new Error(`CORS error: Origin ${origin} not allowed`));
+      }
+    },
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    credentials: true,
+    allowedHeaders: ["Content-Type", "Authorization"],
+    optionsSuccessStatus: 200,
+  })
+);
 
 // Explicitly handle OPTIONS requests
-app.options('*', cors());
+app.options("*", cors());
 
 app.use(express.json());
 
@@ -77,7 +87,8 @@ app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
   console.log(`Origin: ${req.headers.origin}`);
   console.log(`Headers: ${JSON.stringify(req.headers)}`);
-  res.on('finish', () => {
+  console.log(`Body: ${JSON.stringify(req.body)}`);
+  res.on("finish", () => {
     console.log(`Response Status: ${res.statusCode}`);
     console.log(`Response Headers: ${JSON.stringify(res.getHeaders())}`);
   });
@@ -86,7 +97,7 @@ app.use((req, res, next) => {
 
 // Routes
 app.get("/", (req, res) => {
-  res.send("Welcome to the Express.js API!");
+  res.status(200).json({ message: "Welcome to the BootWatcher SMS Backend API!" });
 });
 
 app.get("/users", async (req, res) => {
@@ -96,67 +107,110 @@ app.get("/users", async (req, res) => {
     const users = snapshot.val();
     res.status(200).json(users || {});
   } catch (error) {
-    console.error("Error fetching users:", error);
-    res.status(500).json({ error: "Failed to fetch users" });
+    console.error("Error fetching users:", error.message);
+    res.status(500).json({ error: "Failed to fetch users", details: error.message });
   }
 });
 
 app.post("/send-sms", async (req, res) => {
   try {
-    const { phoneNumbers, message } = req.body;
-    console.log('Received request:', { phoneNumbers, message });
+    const { phoneNumbers, message, parkingLot } = req.body;
+    console.log("Received /send-sms request:", { phoneNumbers, message, parkingLot });
 
-    if (!phoneNumbers || !Array.isArray(phoneNumbers) || !message) {
-      console.log('Invalid request data');
-      return res.status(400).json({ 
-        error: "Invalid request. phoneNumbers must be an array and message is required." 
+    // Validate request body
+    if (!phoneNumbers || !Array.isArray(phoneNumbers) || phoneNumbers.length === 0) {
+      console.log("Invalid request: phoneNumbers must be a non-empty array");
+      return res.status(400).json({
+        success: false,
+        error: "Invalid request: phoneNumbers must be a non-empty array",
+      });
+    }
+
+    if (!message || typeof message !== "string") {
+      console.log("Invalid request: message must be a non-empty string");
+      return res.status(400).json({
+        success: false,
+        error: "Invalid request: message must be a non-empty string",
+      });
+    }
+
+    // Validate phone numbers format (basic validation for E.164 format, e.g., +1234567890)
+    const phoneRegex = /^\+[1-9]\d{1,14}$/;
+    const invalidNumbers = phoneNumbers.filter((num) => !phoneRegex.test(num));
+    if (invalidNumbers.length > 0) {
+      console.log("Invalid phone numbers:", invalidNumbers);
+      return res.status(400).json({
+        success: false,
+        error: "Invalid phone numbers",
+        invalidNumbers,
       });
     }
 
     const results = [];
     for (const phoneNumber of phoneNumbers) {
       try {
-        console.log(`Sending message to ${phoneNumber}`);
+        console.log(`Sending SMS to ${phoneNumber}`);
         const messageResult = await client.messages.create({
           body: message,
           from: twilioPhone,
           to: phoneNumber,
         });
-        console.log(`Successfully sent message to ${phoneNumber}:`, messageResult.sid);
-        results.push(messageResult);
+        console.log(`Successfully sent SMS to ${phoneNumber}: SID ${messageResult.sid}`);
+        results.push({ phoneNumber, sid: messageResult.sid, status: "success" });
+
+        // Optionally log the sent message to Firebase
+        const notificationRef = database.ref("notifications").push();
+        await notificationRef.set({
+          phoneNumber,
+          message,
+          parkingLot: parkingLot || "Unknown",
+          timestamp: admin.database.ServerValue.TIMESTAMP,
+        });
       } catch (error) {
-        console.error(`Failed to send message to ${phoneNumber}:`, error);
-        results.push({ error: error.message, phoneNumber });
+        console.error(`Failed to send SMS to ${phoneNumber}:`, error.message);
+        results.push({ phoneNumber, error: error.message, status: "failed" });
       }
     }
 
-    res.status(200).json({ 
-      success: true, 
-      message: "SMS processing completed", 
-      results 
+    // Check if all messages failed
+    const allFailed = results.every((result) => result.status === "failed");
+    if (allFailed) {
+      return res.status(500).json({
+        success: false,
+        message: "Failed to send SMS to all numbers",
+        results,
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "SMS processing completed",
+      results,
     });
   } catch (error) {
-    console.error("Error in /send-sms endpoint:", error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message || "Failed to send SMS" 
+    console.error("Error in /send-sms endpoint:", error.message);
+    res.status(500).json({
+      success: false,
+      error: "Failed to send SMS",
+      details: error.message,
     });
   }
 });
 
+// 404 Handler
 app.use((req, res) => {
   res.status(404).json({ error: "Route not found" });
 });
 
+// Global Error Handler
 app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ error: "Something went wrong!" });
+  console.error("Global error:", err.message);
+  res.status(500).json({ error: "Something went wrong!", details: err.message });
 });
 
 // Start the server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
+  console.log(`Allowed origins: ${allowedOrigins.join(", ")}`);
 });
-
-//
