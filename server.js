@@ -196,3 +196,4 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log('- /* - Static files and SPA routing');
 }); 
 
+// Start the server
