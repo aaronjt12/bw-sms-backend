@@ -195,5 +195,3 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log('- /maps-error - Google Maps error help page');
   console.log('- /* - Static files and SPA routing');
 }); 
-
-// Start the server
